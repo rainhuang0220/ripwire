@@ -122,3 +122,42 @@ with tempfile.TemporaryDirectory() as temp:
     unknown = report(js_root, 'src/lib.js').find('t')
     assert unknown is not None and unknown.attrib.get('run_unknown') == '1', unknown.attrib if unknown is not None else None
     print('PASS no package.json keeps run_unknown')
+
+    # Vitest 3.2's default include is **/*.{test,spec}.?(c|m)[jt]s?(x). No vitest.config is read.
+    shape = Path(temp) / 'shape'
+    shape.mkdir()
+    write(shape / 'package.json', json.dumps(vitest))
+
+    def gate_name(rel):
+        write(shape / rel, 'export function check() { return 1; }\n')
+        xml = report(shape, rel)
+        row = next((item for item in xml.iter('t') if item.attrib.get('p') == rel), None)
+        js = next((item for item in report(shape, rel, True)['tests_to_run'] if item.get('p') == rel), None)
+        return row, js
+
+    for rel in (
+        'src/lib.test.ts',
+        'src/lib.spec.ts',
+        'src/lib.test.js',
+        'src/lib.test.tsx',
+        'src/lib.spec.mts',
+        'src/lib.test.cts',
+        'test/helpers.test.ts',
+    ):
+        row, js = gate_name(rel)
+        expect = f'npm --prefix . run test -- {rel}'
+        assert row is not None and row.attrib.get('run') == expect and 'run_unknown' not in row.attrib, (rel, None if row is None else row.attrib)
+        assert js is not None and js.get('run') == expect and 'run_unknown' not in js, (rel, js)
+        print('PASS', rel, 'matches Vitest default include; XML and JSON agree')
+
+    for rel in (
+        'test/helpers.ts',
+        'tests/setup.js',
+        'src/test_helper.ts',
+        'src/helper_test.ts',
+        'src/lib.test.helper.ts',
+    ):
+        row, js = gate_name(rel)
+        assert row is not None and row.attrib.get('run_unknown') == '1' and 'run' not in row.attrib, (rel, None if row is None else row.attrib)
+        assert js is not None and js.get('run_unknown') is True and 'run' not in js, (rel, js)
+        print('PASS', rel, 'keeps run_unknown; XML and JSON agree')

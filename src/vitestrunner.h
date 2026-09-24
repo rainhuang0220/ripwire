@@ -22,6 +22,39 @@ extern "C" const TSLanguage* tree_sitter_json( void );
 namespace rw::vitestrunner
 {
 
+// Vitest 3.2's default include (packages/vitest/src/defaults.ts at v3.2.0) is
+// **/*.{test,spec}.?(c|m)[jt]s?(x). No vitest.config is read, so a test/ directory or a
+// test_ / _test name is not enough. The marker sits immediately before the last extension:
+// ".mts" is one extension, and stripping only ".ts" would reject lib.spec.mts.
+inline bool defaultVitestFileName( std::string_view path ) noexcept
+{
+    const std::string_view name = mention_detail::baseNameOf( path );
+    const std::size_t dot = name.rfind( '.' );
+    if( dot == std::string_view::npos || dot == 0 )
+    {
+        return false;
+    }
+    const std::string_view extension = name.substr( dot );
+    static constexpr std::string_view kExtensions[] = {
+        ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"
+    };
+    bool supported = false;
+    for( const std::string_view known : kExtensions )
+    {
+        if( extension == known )
+        {
+            supported = true;
+            break;
+        }
+    }
+    if( !supported )
+    {
+        return false;
+    }
+    const std::string_view stem = name.substr( 0, dot );
+    return stem.ends_with( ".test" ) || stem.ends_with( ".spec" );
+}
+
 // Shared with TestRunnerIndex's existing script-command spelling: safe bytes stay readable;
 // every other path is passed to the shell as one quoted argument.
 inline bool shellSafePath( std::string_view p ) noexcept
@@ -140,10 +173,7 @@ private:
     std::string deriveVitest( std::uint32_t fileId ) const
     {
         const std::string& target = diskPath( *ing_, fileId );
-        const bool jsTest = target.ends_with( ".ts" ) || target.ends_with( ".tsx" ) || target.ends_with( ".js" )
-                         || target.ends_with( ".jsx" ) || target.ends_with( ".mts" ) || target.ends_with( ".mjs" )
-                         || target.ends_with( ".cts" ) || target.ends_with( ".cjs" );
-        if( !jsTest || !isTestPath( rootRelPath( *ing_, fileId ) ) )
+        if( !defaultVitestFileName( target ) || !isTestPath( rootRelPath( *ing_, fileId ) ) )
         {
             return {};
         }
